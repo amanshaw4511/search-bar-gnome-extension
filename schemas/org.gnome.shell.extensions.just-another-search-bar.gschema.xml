@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<schemalist gettext-domain="just-another-search-bar">
+<schemalist gettext-domain="search-bar">
 
-    <schema id="org.gnome.shell.extensions.just-another-search-bar" 
-            path="/org/gnome/shell/extensions/just-another-search-bar/">
+    <schema id="org.gnome.shell.extensions.search-bar" 
+            path="/org/gnome/shell/extensions/search-bar/">
 
         <key type="as" name="open-search-bar-key">
             <default><![CDATA[['<Control><Alt>f']]]></default>

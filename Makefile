@@ -1,22 +1,21 @@
-NAME = just-another-search-bar
-LANG = ru
+NAME = search-bar@aman
 
 all: install
+
+build:
+	tsc
+	mv dist/* .
 
 schemas:
 	glib-compile-schemas --strict --targetdir=schemas/ schemas
 
-gettext:
-	mkdir -p po
-	xgettext --from-code=UTF-8 --output=po/$(LANG).po *.js
-
-bundle:
-	gnome-extensions pack --force --podir=po .
+bundle: build
+	gnome-extensions pack --force --extra-source=bangsearch.js .
 
 install: uninstall bundle
-	gnome-extensions install --force $(NAME)@xelad0m.shell-extension.zip
+	gnome-extensions install --force $(NAME).shell-extension.zip
 
 uninstall:
-	gnome-extensions uninstall $(NAME)@xelad0m || (echo "not installed")
+	gnome-extensions uninstall $(NAME) || (echo "not installed")
 
-.PHONY: all schemas gettext bundle install uninstall 
+.PHONY: all schemas build bundle install uninstall

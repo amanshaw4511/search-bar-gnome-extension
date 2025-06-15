@@ -33,6 +33,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 import { Extension, gettext as _ } from 'resource:///org/gnome/shell/extensions/extension.js';
+import { handlBangQuery, Config } from './bangsearch.js';
 
 
 const ENTER_KEYS = [
@@ -56,6 +57,7 @@ export default class SearchIndicator extends Extension {
 
         Main.panel.addToStatusArea(this.uuid, this._indicator);
         this._indicator.addKeybinding(() => this._indicator.menu.toggle()); // or shell may lose binding on sleep etc
+        Config.getInstance().reloadConfig();
     }
 
     disable() {
@@ -140,78 +142,12 @@ const Indicator = GObject.registerClass(
         }
 
 
-        _read_file(path) {
-            let file = Gio.File.new_for_path(path);
-            let [ok, contents] = file.load_contents(null);
-            if (!ok) {
-                logError(new Error(`Failed to read file: ${path}`), `[ Search Bar ] [Error reading file]`);
-                return '';
-            }
-            return contents.toString();
-        }
-
-        _get_config() {
-            return this._read_config();
-        }
-
-        _read_config() {
-            try {
-                const config = this._read_file(`${GLib.get_home_dir()}/.config/search-bar/config.json`);
-
-                return JSON.parse(config);
-            } catch (e) {
-                logError(e, `[ Search Bar ] [Error reading config file]`);
-                Main.notify(_("Can't read config file"));
-                return []
-            }
-        }
-
-
-
-        _handlBangQuery(query) {
-            /*
-              example of configs
-              [
-                {
-                    "bang": "yt",
-                    "delimiter": "+",
-                    "wildcard": "#",
-                    "command": "xdg-open https://www.youtube.com/results?search_query=#"
-                }
-              ]
-            */
-            const configs = this._get_config();
-            log(`{ query: ${query}, config: ${JSON.stringify(configs)}`);
-
-            const config = configs.find(c => c.bang && query.startsWith(`!${c.bang}`));
-            if (!config) {
-                log(`[ Search Bar ] [Error] No bang command found for query: ${query}`);
-                Main.notify(_("No bang command found for query: ") + `${query}`);
-                return;
-            }
-
-            const command = config.command;
-            const wildcard = config.wildcard ?? '{{query}}';
-            const delimiter = config.delimiter ?? ' ';
-
-            const compiledCommand = command.replace(wildcard, query.slice(config.bang.length + 1).trim().replace(/ /g, delimiter));
-            log(`[ Search Bar ] Executing bang command: ${compiledCommand}`);
-            try {
-                GLib.spawn_command_line_async(compiledCommand);
-            } catch (e) {
-                logError(e, `[ Search Bar ] [Error spawning bang command]: ${compiledCommand}`);
-                Main.notify(_("Can't execute bang command: ") + `${compiledCommand}`);
-                return;
-            }
-        }
-
-
         _onSearchKeyPress(actor, event) {
             let symbol = event.get_key_symbol();
             let query = this.searchBar.get_text();
             if (ENTER_KEYS.includes(symbol) && query.length > 0) {
                 if (query[0] === '!') {
-                    this._handlBangQuery(query);
+                    handlBangQuery(query);
                 } else {
                     this._goSearch(query);
                 }
