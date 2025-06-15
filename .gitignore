@@ -1,21 +1,9 @@
-# Ignore all
-*
+dist/
+node_modules/
 
-# Except these ...
-!.gitignore
-!metadata.json
+*.zip
+
+# Ignore all js file except
+*.js
 !extension.js
-!prefs.js 
-!stylesheet.css
-!LICENSE
-!README.md
-!Makefile
-
-!schemas/
-!schemas/*.xml
-
-!img/
-!img/*
-
-!po/
-!po/*.po
+!prefs.js
