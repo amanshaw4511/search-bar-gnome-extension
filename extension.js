@@ -26,6 +26,7 @@ import Clutter from 'gi://Clutter';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
@@ -47,9 +48,9 @@ let getFocusTimerID = null;
 
 export default class SearchIndicator extends Extension {
     enable() {
-        
+
         log(`[ Search Bar ] ENABLING`);
-        
+
         this._settings = this.getSettings();
         this._indicator = new Indicator(this._settings, () => { this.openPreferences(); });
 
@@ -65,7 +66,7 @@ export default class SearchIndicator extends Extension {
         this._indicator.destroy();
         this._indicator = null;
         this._settings = null;
-        
+
         if (getFocusTimerID) {
             GLib.Source.remove(getFocusTimerID);
             getFocusTimerID = null;
@@ -75,122 +76,194 @@ export default class SearchIndicator extends Extension {
 
 
 const Indicator = GObject.registerClass(
-class Indicator extends PanelMenu.Button {
+    class Indicator extends PanelMenu.Button {
 
-    _init(settings, prefs) {
-        super._init(0.0, 'Search Indicator');
-        
-        this._settings = settings;
-        this._prefs = prefs;
-        this._settings.connect("changed::open-search-bar-key", () => {
-            log(`[ Search Bar ] rebind new keyboard shortcut`);
-            this.removeKeybinding();
+        _init(settings, prefs) {
+            super._init(0.0, 'Search Indicator');
+
+            this._settings = settings;
+            this._prefs = prefs;
+            this._settings.connect("changed::open-search-bar-key", () => {
+                log(`[ Search Bar ] rebind new keyboard shortcut`);
+                this.removeKeybinding();
+                this.addKeybinding(() => this.menu.toggle());
+            });
+
+            this.add_child(new St.Icon({
+                icon_name: 'edit-find-symbolic',
+                style_class: 'system-status-icon',
+            }));
+
+            this.searchBar = new St.Entry({
+                hint_text: '',
+                style_class: 'search-bar',
+            });
+
+            this.searchBar.set_primary_icon(new St.Icon({
+                icon_name: 'go-next-symbolic',
+                style_class: 'popup-menu-icon',
+            }));
+
+            this.searchBar.set_secondary_icon(new St.Icon({
+                icon_name: 'emblem-system-symbolic',
+                style_class: 'popup-menu-icon',
+            }));
+
+            this.searchBar.connect('primary-icon-clicked', this._onSearchIcoClick.bind(this));
+            this.searchBar.connect('secondary-icon-clicked', () => {
+                this.menu.close();
+                this._prefs();
+            });
+
+            let entry = this.searchBar.clutter_text;
+            entry.connect('key-press-event', this._onSearchKeyPress.bind(this));
+
+            let popupSearch = new PopupMenu.PopupMenuSection();
+            popupSearch.actor = this.searchBar;
+
+            this.menu.addMenuItem(popupSearch);
+            this.menu.actor.add_style_class_name('search-bar-menu');
+
+            this.menu.connect('open-state-changed', this._focus.bind(this));
+
             this.addKeybinding(() => this.menu.toggle());
-        });
-
-        this.add_child(new St.Icon({
-            icon_name: 'edit-find-symbolic',
-            style_class: 'system-status-icon',
-        }));
-        
-        this.searchBar = new St.Entry({
-            hint_text: '',
-            style_class: 'search-bar',
-        });
-
-        this.searchBar.set_primary_icon(new St.Icon({
-            icon_name: 'go-next-symbolic',
-            style_class: 'popup-menu-icon',
-        }));
-
-        this.searchBar.set_secondary_icon(new St.Icon({
-            icon_name: 'emblem-system-symbolic',
-            style_class: 'popup-menu-icon',
-        }));
-        
-        this.searchBar.connect('primary-icon-clicked', this._onSearchIcoClick.bind(this));
-        this.searchBar.connect('secondary-icon-clicked', () => { 
-            this.menu.close();
-            this._prefs();
-        });
-
-        let entry = this.searchBar.clutter_text;
-        entry.connect('key-press-event', this._onSearchKeyPress.bind(this));
-
-        let popupSearch = new PopupMenu.PopupMenuSection();
-        popupSearch.actor = this.searchBar;
-
-        this.menu.addMenuItem(popupSearch);
-        this.menu.actor.add_style_class_name('search-bar-menu');
-
-        this.menu.connect('open-state-changed', this._focus.bind(this));
-        
-        this.addKeybinding(() => this.menu.toggle());
-    }
-
-    _onSearchIcoClick(actor, event) {
-        let query = this.searchBar.get_text();
-        if (query.length > 0) {
-            this._goSearch(query);
-            this.searchBar.set_text('');
-            this.menu.close();
         }
-        return Clutter.EVENT_PROPAGATE;
-    }
 
-    _onSearchKeyPress(actor, event) {
-        let symbol = event.get_key_symbol();
-        let query = this.searchBar.get_text();
-        if (ENTER_KEYS.includes(symbol) && query.length > 0) {    
-            this._goSearch(query);
-            this.searchBar.set_text('');
-            this.menu.close();
+        _onSearchIcoClick(actor, event) {
+            let query = this.searchBar.get_text();
+            if (query.length > 0) {
+                this._goSearch(query);
+                this.searchBar.set_text('');
+                this.menu.close();
+            }
+            return Clutter.EVENT_PROPAGATE;
         }
-        return Clutter.EVENT_PROPAGATE;
-    }
 
-    _compileCommand(template, wildcard, delimiter, query) {
-        query = String(query).trim().replace(/ /g, String(delimiter));
-        return (wildcard != '') ? String(template).replace(String(wildcard), query) 
-                                : String(template) + ' ' + query;
-    }
 
-    _goSearch (query) {
-        let cmdId = this._settings.get_int('command-id');
-        let cmdName = this._settings.get_strv('command-names')[cmdId];
-        let template = this._settings.get_strv('command-templates')[cmdId];
-        let wildcard = this._settings.get_strv('command-wildcards')[cmdId];
-        let delimiter = this._settings.get_strv('command-delimiters')[cmdId];
-
-        let command = this._compileCommand(template, wildcard, delimiter, query);
-        try {
-            GLib.spawn_command_line_async(command);
-        } catch (e) {
-            logError(e, `[ Search Bar ] [Error spawning command]: ${command}`);
-            Main.notify(_("Can't open ") + `${cmdName}`);
-            throw e
+        _read_file(path) {
+            let file = Gio.File.new_for_path(path);
+            let [ok, contents] = file.load_contents(null);
+            if (!ok) {
+                logError(new Error(`Failed to read file: ${path}`), `[ Search Bar ] [Error reading file]`);
+                return '';
+            }
+            return contents.toString();
         }
-    }
 
-    _focus (menu, open) {
-        if (open) {
-            getFocusTimerID = setTimeout(() => { 
-                global.stage.set_key_focus(this.searchBar);
-                getFocusTimerID = null;
-            }, 100);
+        _get_config() {
+            return this._read_config();
         }
-    }
-    
-    addKeybinding(handler) {
-        Main.wm.addKeybinding(
-            "open-search-bar-key",
-            this._settings,
-            Meta.KeyBindingFlags.NONE,
-            Shell.ActionMode.ALL,
-            handler);
-    }
 
-    removeKeybinding() {
-        Main.wm.removeKeybinding("open-search-bar-key");
-    }
-})
+        _read_config() {
+            try {
+                const config = this._read_file(`${GLib.get_home_dir()}/.config/search-bar/config.json`);
+
+                return JSON.parse(config);
+            } catch (e) {
+                logError(e, `[ Search Bar ] [Error reading config file]`);
+                Main.notify(_("Can't read config file"));
+                return []
+            }
+        }
+
+
+
+        _handlBangQuery(query) {
+            /*
+              example of configs
+              [
+                {
+                    "bang": "yt",
+                    "delimiter": "+",
+                    "wildcard": "#",
+                    "command": "xdg-open https://www.youtube.com/results?search_query=#"
+                }
+              ]
+            */
+            const configs = this._get_config();
+            log(`{ query: ${query}, config: ${JSON.stringify(configs)}`);
+
+            const config = configs.find(c => c.bang && query.startsWith(`!${c.bang}`));
+            if (!config) {
+                log(`[ Search Bar ] [Error] No bang command found for query: ${query}`);
+                Main.notify(_("No bang command found for query: ") + `${query}`);
+                return;
+            }
+
+            const command = config.command;
+            const wildcard = config.wildcard ?? '{{query}}';
+            const delimiter = config.delimiter ?? ' ';
+
+            const compiledCommand = command.replace(wildcard, query.slice(config.bang.length + 1).trim().replace(/ /g, delimiter));
+            log(`[ Search Bar ] Executing bang command: ${compiledCommand}`);
+            try {
+                GLib.spawn_command_line_async(compiledCommand);
+            } catch (e) {
+                logError(e, `[ Search Bar ] [Error spawning bang command]: ${compiledCommand}`);
+                Main.notify(_("Can't execute bang command: ") + `${compiledCommand}`);
+                return;
+            }
+        }
+
+
+        _onSearchKeyPress(actor, event) {
+            let symbol = event.get_key_symbol();
+            let query = this.searchBar.get_text();
+            if (ENTER_KEYS.includes(symbol) && query.length > 0) {
+                if (query[0] === '!') {
+                    this._handlBangQuery(query);
+                } else {
+                    this._goSearch(query);
+                }
+                this.searchBar.set_text('');
+                this.menu.close();
+            }
+            return Clutter.EVENT_PROPAGATE;
+        }
+
+        _compileCommand(template, wildcard, delimiter, query) {
+            query = String(query).trim().replace(/ /g, String(delimiter));
+            return (wildcard != '') ? String(template).replace(String(wildcard), query)
+                : String(template) + ' ' + query;
+        }
+
+        _goSearch(query) {
+            let cmdId = this._settings.get_int('command-id');
+            let cmdName = this._settings.get_strv('command-names')[cmdId];
+            let template = this._settings.get_strv('command-templates')[cmdId];
+            let wildcard = this._settings.get_strv('command-wildcards')[cmdId];
+            let delimiter = this._settings.get_strv('command-delimiters')[cmdId];
+
+            let command = this._compileCommand(template, wildcard, delimiter, query);
+            try {
+                log(`command: ${command}`)
+                GLib.spawn_command_line_async(command);
+            } catch (e) {
+                logError(e, `[ Search Bar ] [Error spawning command]: ${command}`);
+                Main.notify(_("Can't open ") + `${cmdName}`);
+                throw e
+            }
+        }
+
+        _focus(menu, open) {
+            if (open) {
+                getFocusTimerID = setTimeout(() => {
+                    global.stage.set_key_focus(this.searchBar);
+                    getFocusTimerID = null;
+                }, 100);
+            }
+        }
+
+        addKeybinding(handler) {
+            Main.wm.addKeybinding(
+                "open-search-bar-key",
+                this._settings,
+                Meta.KeyBindingFlags.NONE,
+                Shell.ActionMode.ALL,
+                handler);
+        }
+
+        removeKeybinding() {
+            Main.wm.removeKeybinding("open-search-bar-key");
+        }
+    })
